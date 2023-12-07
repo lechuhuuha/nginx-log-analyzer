@@ -2,7 +2,8 @@
 
 bin/
 coverage.txt
-
+testdata/GeoLite2-City.mmdb
+testdata/*.log
 ### IntelliJ IDEA ###
 .idea
 *.iws

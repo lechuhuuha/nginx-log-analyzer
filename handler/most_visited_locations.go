@@ -2,13 +2,14 @@ package handler
 
 import (
 	"fmt"
-	"github.com/fantasticmao/nginx-log-analyzer/cache"
-	"github.com/fantasticmao/nginx-log-analyzer/ioutil"
-	"github.com/fantasticmao/nginx-log-analyzer/parser"
-	"github.com/oschwald/geoip2-golang"
 	"net"
 	"sort"
 	"strings"
+
+	"github.com/fantasticmao/nginx-log-analyzer/cache"
+	"github.com/fantasticmao/nginx-log-analyzer/ioutil"
+	"github.com/fantasticmao/nginx-log-analyzer/parser"
+	geoip2 "github.com/oschwald/geoip2-golang"
 )
 
 const (

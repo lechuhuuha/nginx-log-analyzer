@@ -3,14 +3,38 @@ package parser
 import (
 	"bytes"
 	"encoding/json"
-	"github.com/fantasticmao/nginx-log-analyzer/ioutil"
+	"regexp"
 	"strconv"
 	"time"
+
+	"github.com/fantasticmao/nginx-log-analyzer/ioutil"
 )
 
 const (
 	LogFormatTypeCombined = "combined"
 	LogFormatTypeJson     = "json"
+	ApacheFormat          = `^([^ ]+) [^ ]+ ([^\/\[]+) \[([^ ]+ [^ ]+)\] \"([A-Z]+) (\S+) (HTTP\/[0-9.]+)" ([\d|-]+) ([\d|-]+) \"(.*?)\" \"([^\"]*)\"`
+	IISFormat             = `^(\S+) \[([^ ]+ [^ ]+)\] "([A-Z]+) (\S+) (HTTP\/[0-9.]+)" ([\d|-]+) ([\d|-]+) \S+ (\S+) (\S+)`
+	NCSAFormat            = `^([^ ]+) [^ ]+ (.+) \[([^ ]+ [^ ]+)\] \"([^ ]+) (.+) (HTTP\/[0-9.]+)\" ([\d|-]+) ([\d|-]+)`
+	ApacheFormatName      = "ApacheFormat"
+	IISFormatName         = "IISFormat"
+	NCSAFormatName        = "NCSAFormat"
+)
+
+type (
+	Parser interface {
+		ParseLog(line []byte) *LogInfo
+	}
+	JsonParser struct {
+	}
+	CombinedParser struct {
+		delimiters [][]byte
+	}
+	CombinedParser2 struct {
+		delimiters [][]byte
+	}
+	CustomParser struct {
+	}
 )
 
 func ParseTime(timeLocal string) time.Time {
@@ -19,13 +43,6 @@ func ParseTime(timeLocal string) time.Time {
 		ioutil.Fatal("parse log time error: %v\n", err.Error())
 	}
 	return t
-}
-
-type Parser interface {
-	ParseLog(line []byte) *LogInfo
-}
-
-type JsonParser struct {
 }
 
 func NewJsonParser() *JsonParser {
@@ -42,18 +59,10 @@ func (parser *JsonParser) ParseLog(line []byte) *LogInfo {
 	return logInfo
 }
 
-type CombinedParser struct {
-	delimiters [][]byte
-}
-
 func NewCombinedParser() *CombinedParser {
-	//                            0             1             2           3         4           5               6                 7
-	// log_format combined '$remote_addr - $remote_user [$time_local] "$request" $status $body_bytes_sent "$http_referer" "$http_user_agent"';
-	//                                   |             |             |          |       |                |               |                  |
-	//                                 ' - '          ' ['         '] "'      '" '     ' '              ' "'           '" "'              '"\n'
+	// log_format combined '103.131.71.189 - - [31/Oct/2023:19:07:45 +0700] "GET /robots.txt HTTP/1.1" 200 182 "-" "Mozilla/5.0 (compatible; coccocbot-web/1.0; +http://help.coccoc.com/searchengine)"';
 	var delimiters = [][]byte{
-		[]byte(" - "), []byte(" ["), []byte("] \""), []byte("\" "),
-		[]byte(" "), []byte(" \""), []byte("\" \""), []byte("\"\n"),
+		[]byte(" - "), []byte(" ["), []byte("] \""), []byte("\" "), []byte(" "), []byte(" \""), []byte("\" \""), []byte("\"\n"),
 	}
 	return &CombinedParser{
 		delimiters: delimiters,
@@ -98,4 +107,106 @@ func (parser *CombinedParser) ParseLog(line []byte) *LogInfo {
 		HttpReferer:   variables[6],
 		HttpUserAgent: variables[7],
 	}
+}
+
+func NewCustomParser() *CustomParser {
+	return &CustomParser{}
+}
+
+func (parser *CustomParser) ParseLog(line []byte) *LogInfo {
+	// autodetect what type of regex to use
+	// 1. ApacheFormat (?^:^([^ ]+) [^ ]+ ([^\/\[]+) \[([^ ]+) [^ ]+\] \"([^ ]+) ([^ ]+)(?: [^\"]+|)\" ([\d|-]+) ([\d|-]+) \"(.*?)\" \"([^\"]*)\")
+	// 2. IISFormat (?^:^(\S+ \S+) (\S+) (\S+) (\S+) (\S+) ([\d|-]+) ([\d|-]+) \S+ (\S+) (\S+))
+	// 3. WebstartFormat (?^:^([^\t]*\t[^\t]*)\t([^\t]*)\t([\d|-]*)\t([^\t]*)\t([^\t]*)\t([^\t]*)\t[^\t]*\t([^\t]*)\t([\d]*))
+	// 4. NCSAFormat (?^:^([^ ]+) [^ ]+ (.+) \[([^ ]+) [^ ]+\] \"([^ ]+) (.+) [^\"]+\" ([\d|-]+) ([\d|-]+))
+	matches, formatType := parser.MatchRegex(string(line))
+	switch formatType {
+	case ApacheFormatName:
+		if len(matches) < 10 {
+			break
+		}
+		status, err := strconv.Atoi(matches[7])
+		if err != nil {
+			status = 500
+		}
+		bodyBytesSent, err := strconv.Atoi(matches[8])
+		if err != nil {
+			bodyBytesSent = 0
+		}
+		return &LogInfo{
+			RemoteAddr:    matches[1],
+			TimeLocal:     matches[3],
+			Method:        matches[4],
+			Request:       matches[5],
+			Protocol:      matches[6],
+			Status:        status,
+			BodyBytesSent: bodyBytesSent,
+			HttpUserAgent: matches[10],
+		}
+	case IISFormatName:
+		if len(matches) < 10 {
+			break
+		}
+		status, err := strconv.Atoi(matches[6])
+		if err != nil {
+			status = 500
+		}
+		bodyBytesSent, err := strconv.Atoi(matches[7])
+		if err != nil {
+			bodyBytesSent = 0
+		}
+		floatValue, err := strconv.ParseFloat(matches[8], 64)
+		if err != nil {
+			floatValue = 0
+		}
+		return &LogInfo{
+			RemoteAddr:    matches[1],
+			TimeLocal:     matches[2],
+			Method:        matches[3],
+			Request:       matches[4],
+			Protocol:      matches[5],
+			Status:        status,
+			BodyBytesSent: bodyBytesSent,
+			HttpUserAgent: matches[9],
+			RequestTime:   floatValue,
+		}
+	case NCSAFormatName:
+		if len(matches) < 9 {
+			break
+		}
+		status, err := strconv.Atoi(matches[7])
+		if err != nil {
+			status = 500
+		}
+		bodyBytesSent, err := strconv.Atoi(matches[8])
+		if err != nil {
+			bodyBytesSent = 0
+		}
+		return &LogInfo{
+			RemoteAddr:    matches[1],
+			RemoteUser:    matches[2],
+			TimeLocal:     matches[3],
+			Method:        matches[4],
+			Request:       matches[5],
+			Protocol:      matches[6],
+			Status:        status,
+			BodyBytesSent: bodyBytesSent,
+		}
+	}
+	return nil
+}
+
+func (parser *CustomParser) MatchRegex(input string) ([]string, string) {
+
+	if match, _ := regexp.MatchString(ApacheFormat, input); match {
+		return regexp.MustCompile(ApacheFormat).FindStringSubmatch(input), ApacheFormatName
+	}
+	if match, _ := regexp.MatchString(IISFormat, input); match {
+		return regexp.MustCompile(IISFormat).FindStringSubmatch(input), IISFormatName
+	}
+	if match, _ := regexp.MatchString(NCSAFormat, input); match {
+		return regexp.MustCompile(NCSAFormat).FindStringSubmatch(input), NCSAFormatName
+	}
+
+	return nil, ""
 }

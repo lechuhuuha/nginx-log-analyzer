@@ -1,9 +1,10 @@
 package handler
 
 import (
+	"testing"
+
 	"github.com/fantasticmao/nginx-log-analyzer/parser"
 	"github.com/stretchr/testify/assert"
-	"testing"
 )
 
 var (

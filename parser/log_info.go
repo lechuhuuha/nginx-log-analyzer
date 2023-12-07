@@ -5,6 +5,8 @@ type LogInfo struct {
 	RemoteUser    string  `json:"remote_user"`
 	TimeLocal     string  `json:"time_local"`
 	Request       string  `json:"request"`
+	Method        string  `json:"method"`
+	Protocol      string  `json:"protocol"`
 	Status        int     `json:"status"`
 	BodyBytesSent int     `json:"body_bytes_sent"`
 	HttpReferer   string  `json:"http_referer"`
