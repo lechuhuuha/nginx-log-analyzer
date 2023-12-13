@@ -2,8 +2,10 @@ package handler
 
 import (
 	"fmt"
-	"github.com/fantasticmao/nginx-log-analyzer/parser"
 	"sort"
+	"sync"
+
+	"github.com/fantasticmao/nginx-log-analyzer/parser"
 )
 
 type MostFrequentStatusHandler struct {
@@ -11,6 +13,8 @@ type MostFrequentStatusHandler struct {
 	statusCountMap map[int]int
 	// status -> uri -> count
 	statusUriCountMap map[int]map[string]int
+	mu                sync.Mutex // Mutex to synchronize map access
+
 }
 
 func NewMostFrequentStatusHandler() *MostFrequentStatusHandler {
@@ -21,6 +25,8 @@ func NewMostFrequentStatusHandler() *MostFrequentStatusHandler {
 }
 
 func (handler *MostFrequentStatusHandler) Input(info *parser.LogInfo) {
+	handler.mu.Lock()
+	defer handler.mu.Unlock()
 	if _, ok := handler.statusUriCountMap[info.Status]; !ok {
 		handler.statusCountMap[info.Status] = 1
 		handler.statusUriCountMap[info.Status] = make(map[string]int)

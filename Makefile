@@ -15,7 +15,7 @@ default: build
 
 .PHONY: default
 
-build: darwin-amd64 linux-amd64 windows-amd64 # Most used
+build: linux-amd64# Most used
 
 build-all: $(PLATFORM_LIST)
 

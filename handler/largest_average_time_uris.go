@@ -2,12 +2,15 @@ package handler
 
 import (
 	"fmt"
-	"github.com/fantasticmao/nginx-log-analyzer/parser"
 	"sort"
+	"sync"
+
+	"github.com/fantasticmao/nginx-log-analyzer/parser"
 )
 
 type LargestAverageTimeUrisHandler struct {
 	timeCostListMap map[string][]float64
+	mu              sync.Mutex // Mutex to synchronize map access
 }
 
 func NewLargestAverageTimeUrisHandler() *LargestAverageTimeUrisHandler {
@@ -17,6 +20,8 @@ func NewLargestAverageTimeUrisHandler() *LargestAverageTimeUrisHandler {
 }
 
 func (handler *LargestAverageTimeUrisHandler) Input(info *parser.LogInfo) {
+	handler.mu.Lock()
+	defer handler.mu.Unlock()
 	if _, ok := handler.timeCostListMap[info.Request]; ok {
 		handler.timeCostListMap[info.Request] = append(handler.timeCostListMap[info.Request], info.RequestTime)
 	} else {

@@ -3,13 +3,15 @@ package main
 import (
 	"flag"
 	"fmt"
-	"github.com/fantasticmao/nginx-log-analyzer/handler"
-	"github.com/fantasticmao/nginx-log-analyzer/ioutil"
-	"github.com/fantasticmao/nginx-log-analyzer/parser"
 	"io"
 	"os"
 	"path"
+	"sync"
 	"time"
+
+	"github.com/fantasticmao/nginx-log-analyzer/handler"
+	"github.com/fantasticmao/nginx-log-analyzer/ioutil"
+	"github.com/fantasticmao/nginx-log-analyzer/parser"
 )
 
 var (
@@ -23,6 +25,7 @@ var (
 	timeAfter    string
 	timeBefore   string
 	logFormat    string
+	multiThread  bool
 )
 
 var (
@@ -34,6 +37,7 @@ var (
 
 func init() {
 	flag.BoolVar(&showVersion, "v", false, "show current version")
+	flag.BoolVar(&multiThread, "m", true, "use concurrent model")
 	flag.StringVar(&configDir, "d", "", "specify the configuration directory")
 	flag.IntVar(&analysisType, "t", 0, "specify the analysis type, see documentation for more details:\nhttps://github.com/fantasticmao/nginx-log-analyzer#specify-the-analysis-type--t")
 	flag.IntVar(&limit, "n", 15, "limit the output lines number")
@@ -82,7 +86,11 @@ func main() {
 
 	p := newLogParser()
 	h := newLogHandler()
-	process(logFiles, p, h, since, util)
+	if multiThread {
+		process(logFiles, p, h, since, util)
+	} else {
+		normalProcess(logFiles, p, h, since, util)
+	}
 }
 
 func newLogHandler() handler.Handler {
@@ -123,6 +131,61 @@ func newLogParser() parser.Parser {
 }
 
 func process(logFiles []string, p parser.Parser, h handler.Handler, since, util time.Time) {
+	start := time.Now()
+	var wg sync.WaitGroup
+	for _, logFile := range logFiles {
+		// 1. open and read file
+		file, isGzip := ioutil.OpenFile(logFile)
+		reader := ioutil.ReadFile(file, isGzip)
+		for {
+
+			data, err := reader.ReadBytes('\n')
+			if err == io.EOF {
+				break
+			} else if err != nil {
+				ioutil.Fatal("read file error: %v\n", err.Error())
+				return
+			}
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				// 2. parse line
+				logInfo := p.ParseLog(data)
+
+				// 3. datetime filter
+				if !since.IsZero() || !util.IsZero() {
+					logTime := parser.ParseTime(logInfo.TimeLocal)
+					if !since.IsZero() && logTime.Before(since) {
+						// go to next line
+						return
+					}
+					if !util.IsZero() && logTime.After(util) {
+						// go to next file
+						return
+					}
+				}
+				// 4. process data
+				h.Input(logInfo)
+			}()
+		}
+		wg.Wait()
+		// 5. close file handler
+		err := file.Close()
+		if err != nil {
+			ioutil.Fatal("close file error: %v\n", err.Error())
+			return
+		}
+	}
+	fmt.Printf("%s took %v\n", "job", time.Since(start))
+
+	// 5. print result
+	h.Output(limit)
+
+}
+
+func normalProcess(logFiles []string, p parser.Parser, h handler.Handler, since, util time.Time) {
+	start := time.Now()
+
 	for _, logFile := range logFiles {
 		// 1. open and read file
 		file, isGzip := ioutil.OpenFile(logFile)
@@ -163,6 +226,7 @@ func process(logFiles []string, p parser.Parser, h handler.Handler, since, util 
 			return
 		}
 	}
+	fmt.Printf("%s took %v\n", "job", time.Since(start))
 
 	// 5. print result
 	h.Output(limit)

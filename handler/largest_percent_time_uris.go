@@ -2,15 +2,19 @@ package handler
 
 import (
 	"fmt"
-	"github.com/fantasticmao/nginx-log-analyzer/ioutil"
-	"github.com/fantasticmao/nginx-log-analyzer/parser"
 	"math"
 	"sort"
+	"sync"
+
+	"github.com/fantasticmao/nginx-log-analyzer/ioutil"
+	"github.com/fantasticmao/nginx-log-analyzer/parser"
 )
 
 type LargestPercentTimeUrisHandler struct {
 	percentile      float64
 	timeCostListMap map[string][]float64
+	mu              sync.Mutex // Mutex to synchronize map access
+
 }
 
 func NewLargestPercentTimeUrisHandler(percentile float64) *LargestPercentTimeUrisHandler {
@@ -25,6 +29,8 @@ func NewLargestPercentTimeUrisHandler(percentile float64) *LargestPercentTimeUri
 }
 
 func (handler *LargestPercentTimeUrisHandler) Input(info *parser.LogInfo) {
+	handler.mu.Lock()
+	defer handler.mu.Unlock()
 	if _, ok := handler.timeCostListMap[info.Request]; ok {
 		handler.timeCostListMap[info.Request] = append(handler.timeCostListMap[info.Request], info.RequestTime)
 	} else {

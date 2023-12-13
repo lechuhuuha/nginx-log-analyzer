@@ -2,14 +2,18 @@ package handler
 
 import (
 	"fmt"
+	"sort"
+	"sync"
+
 	"github.com/fantasticmao/nginx-log-analyzer/ioutil"
 	"github.com/fantasticmao/nginx-log-analyzer/parser"
-	"sort"
 )
 
 type MostVisitedFieldsHandler struct {
 	analysisType int
 	countMap     map[string]int
+	mu           sync.Mutex // Mutex to synchronize map access
+
 }
 
 func NewMostVisitedFieldsHandler(analysisType int) *MostVisitedFieldsHandler {
@@ -32,7 +36,8 @@ func (handler *MostVisitedFieldsHandler) Input(info *parser.LogInfo) {
 		ioutil.Fatal("unsupported analysis type: %v\n", handler.analysisType)
 		return
 	}
-
+	handler.mu.Lock()
+	defer handler.mu.Unlock()
 	if _, ok := handler.countMap[field]; ok {
 		handler.countMap[field]++
 	} else {

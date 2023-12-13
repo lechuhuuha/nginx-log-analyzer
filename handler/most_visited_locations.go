@@ -5,6 +5,7 @@ import (
 	"net"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/fantasticmao/nginx-log-analyzer/cache"
 	"github.com/fantasticmao/nginx-log-analyzer/ioutil"
@@ -13,16 +14,40 @@ import (
 )
 
 const (
-	countryChina = "China"
-	countryJapan = "Japan"
-	areaHongKong = "Hong Kong"
-	areaTaiwan   = "Taiwan"
-	cityUnknown  = "unknown"
+	// Countries
+	countryChina     = "China"
+	countryJapan     = "Japan"
+	areaHongKong     = "Hong Kong"
+	areaTaiwan       = "Taiwan"
+	countryUSA       = "United States"
+	countryIndia     = "India"
+	countryGermany   = "Germany"
+	countryAustralia = "Australia"
+	countryBrazil    = "Brazil"
+	countryCanada    = "Canada"
+	countryVietnam   = "Vietnam" // Added Vietnam to the list
+	// Add more countries as needed
+
+	cityUnknown = "unknown"
 )
+
+var (
+	countryMap map[string]string
+)
+
 const (
+	// Languages
 	languageEn   = "en"
 	languageJa   = "ja"
 	languageZhCn = "zh-CN"
+	languageDe   = "de"
+	languageEs   = "es"
+	languageFr   = "fr"
+	languagePtBr = "pt-BR"
+	languageRu   = "ru"
+	languageHiIn = "hi-IN"
+	languageVi   = "vi" // Added Vietnamese to the list
+	// Add more languages as needed
 )
 
 type MostVisitedLocationsHandler struct {
@@ -35,6 +60,7 @@ type MostVisitedLocationsHandler struct {
 	countryCityCountMap map[string]map[string]int
 	// country -> city -> ip -> count
 	countryCityIpCountMap map[string]map[string]map[string]int
+	mu                    sync.Mutex // Mutex to synchronize map access
 }
 
 type locationEntry struct {
@@ -61,6 +87,8 @@ func NewMostVisitedLocationsHandler(dbFile string, limitSecond int) *MostVisited
 func (handler *MostVisitedLocationsHandler) Input(info *parser.LogInfo) {
 	country, city := handler.queryIpLocation(info.RemoteAddr)
 
+	handler.mu.Lock()
+	defer handler.mu.Unlock()
 	// save or update by country
 	if _, ok := handler.countryCityIpCountMap[country]; !ok {
 		handler.countryCountMap[country] = 1
@@ -88,7 +116,7 @@ func (handler *MostVisitedLocationsHandler) Input(info *parser.LogInfo) {
 
 func (handler *MostVisitedLocationsHandler) Output(limit int) {
 	defer handler.geoLite2Db.Close()
-
+	countryMap := make(map[string]string)
 	countryCountKeys := make([]string, 0, len(handler.countryCityIpCountMap))
 	for k := range handler.countryCityIpCountMap {
 		countryCountKeys = append(countryCountKeys, k)
@@ -99,7 +127,14 @@ func (handler *MostVisitedLocationsHandler) Output(limit int) {
 
 	for i := 0; i < len(countryCountKeys); i++ {
 		country := countryCountKeys[i]
+
+		if _, ok := countryMap[country]; !ok {
+			countryMap[country] = ""
+		}
 		cityIpCountMap := handler.countryCityIpCountMap[country]
+		if countryVietnam != country {
+			continue
+		}
 		fmt.Printf("[%v] hits: %v\n", country, handler.countryCountMap[country])
 
 		cityCountKeys := make([]string, 0, len(cityIpCountMap))
@@ -129,6 +164,7 @@ func (handler *MostVisitedLocationsHandler) Output(limit int) {
 			}
 		}
 	}
+	fmt.Println(countryMap)
 }
 
 func (handler *MostVisitedLocationsHandler) queryIpLocation(ip string) (string, string) {
@@ -145,7 +181,7 @@ func (handler *MostVisitedLocationsHandler) queryIpLocation(ip string) (string, 
 	country := record.Country.Names[languageEn]
 	city := record.City.Names[languageEn]
 	if city == "" {
-		city = cityUnknown
+		city = record.City.Names[languageVi]
 	}
 
 	if strings.EqualFold(countryChina, country) || strings.EqualFold(areaHongKong, country) ||
