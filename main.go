@@ -26,6 +26,7 @@ var (
 	timeBefore   string
 	logFormat    string
 	multiThread  bool
+	err          error
 )
 
 var (
@@ -34,6 +35,24 @@ var (
 	BuildTime  string
 	CommitHash string
 )
+
+type (
+	loganalyzer struct {
+		parser  parser.Parser
+		handler handler.Handler
+		since   time.Time
+		util    time.Time
+		wg      sync.WaitGroup
+	}
+)
+
+func (l *loganalyzer) add() {
+	l.wg.Add(1)
+}
+
+func NewLogAnalyzer() loganalyzer {
+	return loganalyzer{}
+}
 
 func init() {
 	flag.BoolVar(&showVersion, "v", false, "show current version")
@@ -64,33 +83,26 @@ func main() {
 		}
 		configDir = path.Join(homeDir, ".config", Name)
 	}
-
-	var (
-		since, util time.Time
-		err         error
-	)
+	loganalyze := NewLogAnalyzer()
 	if timeAfter != "" {
-		since, err = time.Parse(time.RFC3339, timeAfter)
+		loganalyze.since, err = time.Parse(time.RFC3339, timeAfter)
 		if err != nil {
 			ioutil.Fatal("parse start time error: %v\n", err.Error())
 			return
 		}
 	}
 	if timeBefore != "" {
-		util, err = time.Parse(time.RFC3339, timeBefore)
+		loganalyze.util, err = time.Parse(time.RFC3339, timeBefore)
 		if err != nil {
 			ioutil.Fatal("parse end time error: %v\n", err.Error())
 			return
 		}
 	}
 
-	p := newLogParser()
-	h := newLogHandler()
-	if multiThread {
-		process(logFiles, p, h, since, util)
-	} else {
-		normalProcess(logFiles, p, h, since, util)
-	}
+	loganalyze.parser = newLogParser()
+	loganalyze.handler = newLogHandler()
+	process(logFiles, &loganalyze)
+
 }
 
 func newLogHandler() handler.Handler {
@@ -130,104 +142,87 @@ func newLogParser() parser.Parser {
 	}
 }
 
-func process(logFiles []string, p parser.Parser, h handler.Handler, since, util time.Time) {
-	start := time.Now()
-	var wg sync.WaitGroup
-	for _, logFile := range logFiles {
-		// 1. open and read file
-		file, isGzip := ioutil.OpenFile(logFile)
-		reader := ioutil.ReadFile(file, isGzip)
-		for {
-
-			data, err := reader.ReadBytes('\n')
-			if err == io.EOF {
-				break
-			} else if err != nil {
-				ioutil.Fatal("read file error: %v\n", err.Error())
-				return
-			}
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				// 2. parse line
-				logInfo := p.ParseLog(data)
-
-				// 3. datetime filter
-				if !since.IsZero() || !util.IsZero() {
-					logTime := parser.ParseTime(logInfo.TimeLocal)
-					if !since.IsZero() && logTime.Before(since) {
-						// go to next line
-						return
-					}
-					if !util.IsZero() && logTime.After(util) {
-						// go to next file
-						return
-					}
-				}
-				// 4. process data
-				h.Input(logInfo)
-			}()
+func isDateSkipAble(loganalyzer *loganalyzer, logInfo *parser.LogInfo) bool {
+	if !loganalyzer.since.IsZero() || !loganalyzer.util.IsZero() {
+		logTime := parser.ParseTime(logInfo.TimeLocal)
+		if !loganalyzer.since.IsZero() && logTime.Before(loganalyzer.since) {
+			// go to next line
+			return true
 		}
-		wg.Wait()
-		// 5. close file handler
+		if !loganalyzer.util.IsZero() && logTime.After(loganalyzer.util) {
+			// go to next file
+			return true
+		}
+	}
+	return false
+}
+
+func parseLog(loganalyzer *loganalyzer, data []byte) {
+	logInfo := loganalyzer.parser.ParseLog(data)
+	skipAble := isDateSkipAble(loganalyzer, logInfo)
+	if skipAble {
+		return
+	}
+	loganalyzer.handler.Input(logInfo)
+}
+
+func generator(tokens chan<- []byte, logFile string) {
+	file, isGzip := ioutil.OpenFile(logFile)
+	reader, err := ioutil.ReadFile(file, isGzip)
+	if err != nil {
+		ioutil.Fatal(err.Error())
+	}
+	defer func() {
 		err := file.Close()
 		if err != nil {
 			ioutil.Fatal("close file error: %v\n", err.Error())
-			return
 		}
-	}
-	fmt.Printf("%s took %v\n", "job", time.Since(start))
+		close(tokens)
+	}()
 
-	// 5. print result
-	h.Output(limit)
+	for {
+		data, err := reader.ReadBytes('\n')
+		if err == io.EOF {
+			break
+		} else if err != nil {
+			break
+		}
+		tokens <- data // acquire a token
+	}
 
 }
 
-func normalProcess(logFiles []string, p parser.Parser, h handler.Handler, since, util time.Time) {
-	start := time.Now()
-
-	for _, logFile := range logFiles {
-		// 1. open and read file
-		file, isGzip := ioutil.OpenFile(logFile)
-		reader := ioutil.ReadFile(file, isGzip)
-		for {
-			data, err := reader.ReadBytes('\n')
-			if err == io.EOF {
-				break
-			} else if err != nil {
-				ioutil.Fatal("read file error: %v\n", err.Error())
-				return
-			}
-
-			// 2. parse line
-			logInfo := p.ParseLog(data)
-
-			// 3. datetime filter
-			if !since.IsZero() || !util.IsZero() {
-				logTime := parser.ParseTime(logInfo.TimeLocal)
-				if !since.IsZero() && logTime.Before(since) {
-					// go to next line
-					continue
-				}
-				if !util.IsZero() && logTime.After(util) {
-					// go to next file
-					break
-				}
-			}
-
-			// 4. process data
-			h.Input(logInfo)
-		}
-
-		// 5. close file handler
-		err := file.Close()
-		if err != nil {
-			ioutil.Fatal("close file error: %v\n", err.Error())
-			return
-		}
+func merge(loganalyzer *loganalyzer, data <-chan []byte, wg *sync.WaitGroup) {
+	for d := range data {
+		wg.Add(1)
+		go func(pLog []byte) {
+			defer wg.Done()
+			parseLog(loganalyzer, pLog)
+		}(d)
 	}
-	fmt.Printf("%s took %v\n", "job", time.Since(start))
+}
 
+func process(logFiles []string, loganalyzer *loganalyzer) {
+	start := time.Now()
+	var (
+		tokens = make(chan []byte, 100000)
+		wg     sync.WaitGroup
+	)
+	for _, logFile := range logFiles {
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			generator(tokens, logFile)
+		}()
+		go func() {
+			defer func() {
+				wg.Done()
+			}()
+			merge(loganalyzer, tokens, &wg)
+		}()
+	}
 	// 5. print result
-	h.Output(limit)
+	wg.Wait()
+	loganalyzer.handler.Output(limit)
+	fmt.Printf("%s took %v\n", "job", time.Since(start))
 }

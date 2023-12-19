@@ -1,8 +1,9 @@
 package ioutil
 
 import (
-	"github.com/stretchr/testify/assert"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestOpenFile(t *testing.T) {
@@ -21,14 +22,23 @@ func TestOpenFile(t *testing.T) {
 
 func TestReadFile(t *testing.T) {
 	file, isGzip := OpenFile("../testdata/access.log")
-	reader := ReadFile(file, isGzip)
+	reader, err := ReadFile(file, isGzip)
+	if err != nil {
+		assert.Error(t, err)
+	}
 	assert.NotNil(t, reader)
 
 	file, isGzip = OpenFile("../testdata/access.json.log")
-	reader = ReadFile(file, isGzip)
+	reader, err = ReadFile(file, isGzip)
+	if err != nil {
+		assert.Error(t, err)
+	}
 	assert.NotNil(t, reader)
 
 	file, isGzip = OpenFile("../testdata/access.json.log.1.gz")
-	reader = ReadFile(file, isGzip)
+	reader, err = ReadFile(file, isGzip)
+	if err != nil {
+		assert.Error(t, err)
+	}
 	assert.NotNil(t, reader)
 }

@@ -3,6 +3,7 @@ package ioutil
 import (
 	"bufio"
 	"compress/gzip"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,15 +20,14 @@ func OpenFile(path string) (*os.File, bool) {
 	return file, strings.EqualFold(".gz", ext)
 }
 
-func ReadFile(file *os.File, isGzip bool) *bufio.Reader {
+func ReadFile(file *os.File, isGzip bool) (*bufio.Reader, error) {
 	if isGzip {
 		gzipReader, err := gzip.NewReader(file)
 		if err != nil {
-			Fatal("gzip new reader error: %v\n", err.Error())
-			return nil
+			return nil, fmt.Errorf("gzip new reader error: %v\n", err.Error())
 		}
-		return bufio.NewReader(gzipReader)
+		return bufio.NewReader(gzipReader), nil
 	} else {
-		return bufio.NewReader(file)
+		return bufio.NewReader(file), nil
 	}
 }
