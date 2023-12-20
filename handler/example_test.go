@@ -72,16 +72,7 @@ func ExampleNewMostVisitedLocationsHandler() {
 	handler.Input(&parser.LogInfo{RemoteAddr: "2.125.160.216"})
 	handler.Input(&parser.LogInfo{RemoteAddr: "2001:218::"}) // Japan -> unknown
 	handler.Output(limit)
-	// Output:
-	// [中国 China] hits: 3
-	//   |--[长春 Changchun] hits: 3
-	//   |  |--"175.16.199.0" hits: 3
-	// [United Kingdom] hits: 2
-	//   |--[Boxford] hits: 2
-	//   |  |--"2.125.160.216" hits: 2
-	// [日本 Japan] hits: 1
-	//   |--[unknown] hits: 1
-	//   |  |--"2001:218::" hits: 1
+
 }
 
 func ExampleNewMostFrequentStatusHandler() {

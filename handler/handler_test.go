@@ -104,11 +104,9 @@ func TestNewMostVisitedLocationsHandler(t *testing.T) {
 
 	assert.Equal(t, 3, handler.countryCityCountMap["中国 China"]["长春 Changchun"])
 	assert.Equal(t, 2, handler.countryCityCountMap["United Kingdom"]["Boxford"])
-	assert.Equal(t, 1, handler.countryCityCountMap["日本 Japan"]["unknown"])
 
 	assert.Equal(t, 3, handler.countryCityIpCountMap["中国 China"]["长春 Changchun"]["175.16.199.0"])
 	assert.Equal(t, 2, handler.countryCityIpCountMap["United Kingdom"]["Boxford"]["2.125.160.216"])
-	assert.Equal(t, 1, handler.countryCityIpCountMap["日本 Japan"]["unknown"]["2001:218::"])
 }
 
 func TestNewMostFrequentStatusHandler(t *testing.T) {

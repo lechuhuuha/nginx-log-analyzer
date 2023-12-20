@@ -101,7 +101,7 @@ func main() {
 
 	loganalyze.parser = newLogParser()
 	loganalyze.handler = newLogHandler()
-	process(logFiles, &loganalyze)
+	testProcess(logFiles, &loganalyze)
 
 }
 
@@ -205,10 +205,11 @@ func merge(loganalyzer *loganalyzer, data <-chan []byte, wg *sync.WaitGroup) {
 func process(logFiles []string, loganalyzer *loganalyzer) {
 	start := time.Now()
 	var (
-		tokens = make(chan []byte, 100000)
-		wg     sync.WaitGroup
+		wg sync.WaitGroup
+		// tokens = make(chan []byte, 100000)
 	)
 	for _, logFile := range logFiles {
+		tokens := make(chan []byte, 100000)
 		wg.Add(2)
 		go func() {
 			defer wg.Done()
@@ -223,6 +224,60 @@ func process(logFiles []string, loganalyzer *loganalyzer) {
 	}
 	// 5. print result
 	wg.Wait()
-	loganalyzer.handler.Output(limit)
+	// loganalyzer.handler.Output(limit)
+	fmt.Printf("%s took %v\n", "job", time.Since(start))
+}
+
+func testProcess(logFiles []string, loganalyzer *loganalyzer) {
+	start := time.Now()
+	var wg sync.WaitGroup
+	for _, logFile := range logFiles {
+		// 1. open and read file
+		file, isGzip := ioutil.OpenFile(logFile)
+		reader, err := ioutil.ReadFile(file, isGzip)
+		if err != nil {
+			ioutil.Fatal("read file error: %v\n", err.Error())
+		}
+		for {
+
+			data, err := reader.ReadBytes('\n')
+			if err == io.EOF {
+				break
+			} else if err != nil {
+				ioutil.Fatal("read file error: %v\n", err.Error())
+				return
+			}
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				// 2. parse line
+				logInfo := loganalyzer.parser.ParseLog(data)
+
+				// 3. datetime filter
+				if !loganalyzer.since.IsZero() || !loganalyzer.util.IsZero() {
+					logTime := parser.ParseTime(logInfo.TimeLocal)
+					if !loganalyzer.since.IsZero() && logTime.Before(loganalyzer.since) {
+						// go to next line
+						return
+					}
+					if !loganalyzer.util.IsZero() && logTime.After(loganalyzer.util) {
+						// go to next file
+						return
+					}
+				}
+				// 4. process data
+				loganalyzer.handler.Input(logInfo)
+			}()
+		}
+		wg.Wait()
+		// 5. close file handler
+		err = file.Close()
+		if err != nil {
+			ioutil.Fatal("close file error: %v\n", err.Error())
+			return
+		}
+	}
+	// 5. print result
+	// loganalyzer.handler.Output(limit)
 	fmt.Printf("%s took %v\n", "job", time.Since(start))
 }
